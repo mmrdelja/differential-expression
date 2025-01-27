@@ -1,1 +1,103 @@
+import subprocess, os
+import glob
+import shutil #imports required for function
+
+#README
+#Instructions for running this script are found in the comments below, as well as the write-up.
+#IMPORTANT: ensure only 1 reference genome FASTA file is in the working directory. 
+#Only Chromosome 22 is used in this script, as the file size is smaller and easier to use, 
+#HOWEVER no files are included here and would need to be down/uploaded.
+#Ensure NO other FASTQ files are in the working directory to prevent excessively slow run time.
+
+#This script is built for single-end reads, but can be ammended for paired-ends.
+#The test FASTQ was found through the Sequence Read Archive (SRA), but is not included here. 
+#If you would like to run a different FASTQ or use a different reference genome,
+#follow this:
+#Replace the test FASTQ with any other single-end WGS FASTQ. 
+#Remove old FASTQ from working directory and update line 99 (featureCounts)
+#Replace chr22.fa with your reference of choice, remove old FASTA,
+#and on line 77 in the script, update chr22_index with the appropriate file name.
+#The GTF file in the working directory must also be replaced with the corresponding chosen chromosome.
+#Lastly, update the featureCounts code (line 101) with the relevant file names.
+
+#Before running the script, ensure the following are installed: fastp, samtools, hisat2, subread.
+#Installation instructions can be found in the write-up.
+
+#Upon unzipping the file, you can find the necessary inputs: 
+#1) the python script (README in comments and write-up)
+#2) test FASTQ (SRR15068323.fastq)
+#3) a reference genome (chr22.fa)
+#4) a GTF annotation file (gencode.v22.annotation.gtf)
+#5) write-up
+#These must all be in the working directory for the script to function.
+#All outputs are detailed in the write-up.
+#IMPORTANT: Due to the nature of the data and the alignment tool itself, this script runs slowly,
+#and takes approximately 30 minutes to run. Please allow the script to run and do not interrupt it. 
+
+#Our first step is preprocessing of the FASTQs.
+#This script uses the Fastp tool for all preprocessing needs.
+#The tool may be added in command line via Anaconda with this code: conda install -c bioconda fastp
+#More information about the tool is available in the write-up.
+
+if not os.path.exists('extras'): #checks if extras directory exists
+    os.makedirs('extras') #creates extras directory for files we don't need anymore
+
+if os.path.exists('*.json'): #if file already exists
+    os.remove('*.json') #remove file
+
+if os.path.exists('*.html'): #if file already exists
+    os.remove('*.html') #remove file
+
+for fastqs in glob.iglob('*.fastq'): #for FASTQ files
+    namefix = fastqs.split('.fastq')[0] #to keep name, removes unwanted portion in file name
+    cmd1 = f"fastp -i {namefix}.fastq -o {namefix}_processed.fastq" #shell command
+    os.system(cmd1) #runs FASTQ through fastp tool to preprocess for downstream analysis
+    #We want to move the original fastq to a new folder so it doesn't interfere with the script.
+    moving = f"{namefix}.fastq" #what we want to move
+    destination = './extras' #where we want it to go
+    shutil.move(moving, destination) #execute move
+
+#With our FASTQ now processed and prepared for downstream analysis, we can continue.
+#Ensure the reference genome of interest is in the working directory.
+#In our context, we have a fasta file of Chromosome 22 (source in write-up).
+#This script uses HISAT2 to index the reference and align our FASTQ of interest to the reference.
+#More information about the HISAT2 tool can be found in the write-up.
+
+#First, HISAT2 is used to build the index. This creates the indexes necessary for alignment.
+#More information can be found in the write-up.
+for reference in glob.iglob('*.fa'): #for fasta reference
+    namefix = reference.split('.fa')[0] #isolate name
+    index_command = f'hisat2-build -f {namefix}.fa {namefix}_index' #command to build index
+    os.system(index_command) #execute command
+
+#After building the indexes, we can align our processed fastq. This will produce a SAM file.
+#More information can be found in the write-up.
+for processed in glob.iglob('*.fastq'): #for the processed fastqs
+    namefix = processed.split('.fastq')[0] #isolate name
+    align_command = f"hisat2 -q -x chr22_index {namefix}.fastq -S {namefix}.sam" 
+    #command to align and generate SAM file based on files in working directory
+    os.system(align_command) #execute command
+
+#When we have a SAM file, we can convert it to binary form, a BAM file.
+#More information about both file formats can be found in the write-up.
+for aligned in glob.iglob('*.sam'): #for aligned SAM file
+    namefix = aligned.split('.sam')[0] #isolate name
+    bam_command = f"samtools view -bS {namefix}.sam > {namefix}.bam" #use samtools to convert SAM to BAM
+    os.system(bam_command) #shell command to convert sam to bam files
+
+#The BAM file in question must be sorted for downstream processing and analysis.
+for BAMS in glob.iglob('*.bam'): #for BAM files
+    namefix = BAMS.split('.bam')[0] #isolate name
+    sort_bam = f"samtools sort -o {namefix}.sorted.bam {namefix}.bam" #samtools sorts BAM file
+    os.system(sort_bam) #shell command to sort bam files
+
+#In order to enable downstream processing and analysis, the sorted BAM must be indexed.
+for sorted_bams in glob.iglob('*.sorted.bam'):
+    namefix = sorted_bams.split('.sorted.bam')[0] #removes unwanted portion in file name
+    index_bam = f"samtools index {namefix}.sorted.bam" #samtools indexes sorted BAM
+    os.system(index_bam) #shell command to index sorted bam files. Generates name.sorted.bam.bai files 
+
+#This enables featureCounts to quantify expression. See write-up if you want to run other files.
+counts_command = 'featureCounts -a gencode.v22.annotation.gtf -o counts.txt SRR15068323_processed.sorted.bam'
+os.system(counts_command)
 
