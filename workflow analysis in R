@@ -1,0 +1,357 @@
+#DS: The data set GSE number to download.
+#gpl: The GPL number of the data set to download.
+#gsm: A character string containing numbers indicating the treatment conditions to download.
+#namestr: a list housing the column names for each dataset to download.
+#duprm: if "T", all duplicated rows will be removed. if "F" all duplicate rows will be retained
+GEORNAseqcompileR <- function(DS, gpl, gsm, namestr, duprm = "T"){
+  pb <- txtProgressBar(min = 0, max = length(DS), style = 3)
+  
+  for(a in 1:length(DS)){
+    #### Obtain names of dataset columns ####
+    #########################################
+    n <- namestr[[a]]
+    
+    #### Download GEO data ####
+    ###########################
+    gset <- suppressMessages(getGEO(DS[a], GSEMatrix =TRUE, AnnotGPL=TRUE))
+    if (length(gset) > 1) idx <- grep(gpl[a], attr(gset, "names")) else idx <- 1
+    gset <- gset[[idx]]
+    # make proper column names to match toptable 
+    fvarLabels(gset) <- make.names(fvarLabels(gset))
+    # group names for all samples
+    gsms <- gsm[a]
+    sml <- c()
+    for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+    # log2 transform
+    ex <- exprs(gset)
+    qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+    LogC <- (qx[5] > 100) ||
+      (qx[6]-qx[1] > 50 && qx[2] > 0) ||
+      (qx[2] > 0 && qx[2] < 1 && qx[4] > 1 && qx[4] < 2)
+    if (LogC) { ex[which(ex <= 0)] <- NaN
+    exprs(gset) <- log2(ex) }
+    # set up the data and proceed with analysis
+    sml <- paste("G", sml, sep="")    # set group names
+    fl <- as.factor(sml)
+    gset$description <- fl
+    design <- model.matrix(~ description + 0, gset)
+    colnames(design) <- levels(fl)
+    fit <- lmFit(gset, design)
+    cont.matrix <- makeContrasts(G1-G0, levels=design)
+    fit2 <- contrasts.fit(fit, cont.matrix)
+    fit2 <- eBayes(fit2, 0.01)
+    tT <- topTable(fit2, adjust="fdr", sort.by="B", number=25000000)
+    
+    #### annotate with gene names ####
+    ##################################
+    tT <- subset(tT, select=c("ID","Gene.symbol")) #, ,"adj.P.Val","P.Value","t","B","logFC"
+    ex2 <- data.table(ex)
+    
+    #### Subset columns of interest ####
+    ####################################
+    ex2 <- ex2[,grepl("[0-9]", strsplit(as.character(gsm[a]), split = "")[[1]]), with = FALSE]
+    ex2$ID <- rownames(ex)
+    mer <- merge(tT, ex2, by = "ID")
+    
+    #### retain only data columns and gene names ####
+    #################################################
+    mer <-data.table(mer) %>% setnames((colnames(mer)[grepl("GSM", colnames(mer))]), n)
+    mer <- mer[,2:ncol(mer)]
+    if(a ==1){compdt <- mer}
+    if(a > 1){compdt <- merge(compdt,mer, by = "Gene.symbol", allow.cartesian = TRUE)}
+    #### remove duplicated entries and genes without a name ####
+    compdt <- compdt[!Gene.symbol == ""]    
+    if(duprm == "T"){compdt <- compdt[!duplicated(Gene.symbol),]}
+    setTxtProgressBar(pb, a)
+  }
+  close(pb)
+  return(compdt)
+}
+
+#########################################################################################################
+#### This function downloads fold change data from GEO and compiles it together into one data frame. ####
+#########################################################################################################
+#DS: The data set GSE number to download.
+#gpl: The GPL number of the data set to download.
+#gsm: A character string containing numbers indicating the treatment conditions to download.
+#namestr: a list housing the column names for each dataset to download.
+#duprm: if "T", all duplicated rows will be removed. if "F" all duplicate rows will be retained
+
+GEOFCcompileR <- function(DS, gpl, gsm, namestr, duprm = "T"){
+  pb <- txtProgressBar(min = 0, max = length(DS), style = 3)
+  
+  #compdt <- data.table()
+  for(a in 1:length(DS)){
+    #### Obtain names of dataset columns ####
+    #########################################
+    n <- namestr[[a]]
+    
+    #### Download GEO data ####
+    ###########################
+    gset <- suppressMessages(getGEO(DS[a], GSEMatrix =TRUE, AnnotGPL=TRUE))
+    if (length(gset) > 1) idx <- grep(gpl[a], attr(gset, "names")) else idx <- 1
+    gset <- gset[[idx]]
+    # make proper column names to match toptable 
+    fvarLabels(gset) <- make.names(fvarLabels(gset))
+    # group names for all samples
+    gsms <- gsm[a]
+    sml <- c()
+    for (i in 1:nchar(gsms)) { sml[i] <- substr(gsms,i,i) }
+    # eliminate samples marked as "X"
+    sel <- which(sml != "X")
+    sml <- sml[sel]
+    gset <- gset[ ,sel]
+    
+    # log2 transform
+    ex <- exprs(gset)
+    qx <- as.numeric(quantile(ex, c(0., 0.25, 0.5, 0.75, 0.99, 1.0), na.rm=T))
+    LogC <- (qx[5] > 100) ||
+      (qx[6]-qx[1] > 50 && qx[2] > 0) ||
+      (qx[2] > 0 && qx[2] < 1 && qx[4] > 1 && qx[4] < 2)
+    if (LogC) { ex[which(ex <= 0)] <- NaN
+    exprs(gset) <- log2(ex) }
+    # set up the data and proceed with analysis
+    sml <- paste("G", sml, sep="")    # set group names
+    fl <- as.factor(sml)
+    gset$description <- fl
+    design <- model.matrix(~ description + 0, gset)
+    colnames(design) <- levels(fl)
+    fit <- lmFit(gset, design)
+    cont.matrix <- makeContrasts(G1-G0, levels=design)
+    fit2 <- contrasts.fit(fit, cont.matrix)
+    fit2 <- eBayes(fit2, 0.01)
+    tT <- topTable(fit2, adjust="fdr", sort.by="B", number=25000000)
+    
+    #### annotate with gene names ####
+    ##################################
+    #   tT <- subset(tT, select=c("ID","Gene.symbol")) #, ,"adj.P.Val","P.Value","t","B","logFC"
+    
+    #### Subset columns of interest ####
+    ####################################    
+    #ex2 <- data.table(tT[,c("Gene.symbol", "logFC", "P.Value")])
+    ex2 <- data.table(subset(tT, select=c("Gene.symbol", "logFC", "P.Value")))
+    
+    #### rename columns and merge data.table ####
+    #############################################
+    setnames(ex2, colnames(ex2), n)
+    if(a == 1){compdt <- ex2
+    if(duprm == "T"){compdt <- compdt[!duplicated(Gene.symbol),]}
+    }else{
+      compdt <- merge(compdt, ex2, by = "Gene.symbol")
+      if(duprm == "T"){compdt <- compdt[!duplicated(Gene.symbol),]}
+    }
+    setTxtProgressBar(pb, a)
+  }
+  close(pb)
+  return(compdt)
+}
+library(GEOquery)
+library(limma)
+library(data.table)
+library(dplyr)
+measured <- GEORNAseqcompileR(DS="GSE18606", 
+                              gpl="GPL6480", 
+                              gsm="000000000111111221111121222223333334433334344444", 
+                              namestr=list(
+                                c("ctrl1", "ctrl2", "ctrl3", "ctrl4", "ctrl5", "ctrl6", "ctrl7", "ctrl8", "ctrl9",
+                                  "responder1", "responder2", "responder3", "responder4", "responder5",
+                                  "responder6", "non_responder1", "non_responder2", "responder7", "responder8", 
+                                  "responder9", "responder10", "responder11", "non_responder3", "responder12",
+                                  "non_responder4","non_responder5","non_responder6","non_responder7","non_responder8",
+                                  "responder_IVIG1","responder_IVIG2","responder_IVIG3","responder_IVIG4","responder_IVIG5","responder_IVIG6",
+                                  "non_responder_IVIG1", "non_responder_IVIG2",
+                                  "responder_IVIG7","responder_IVIG8","responder_IVIG9","responder_IVIG10",
+                                  "non_responder_IVIG3",
+                                  "responder_IVIG11",
+                                  "non_responder_IVIG4","non_responder_IVIG5","non_responder_IVIG6","non_responder_IVIG7","non_responder_IVIG8")), 
+                              duprm = "T")
+
+ds <- c("GSE18606", "GSE18606")
+gp <- c("GPL6480", "GPL6480")
+gs <- c("00000000011111111111111111111XXXXXXXXXXXXXXXXXXX", "000000000XXXXXXXXXXXXXXXXXXXX1111111111111111111")
+names <- list(c("Gene.symbol", "logFC", "P.Value"),c("Gene.symbol", "logFC_IVIG", "P.Value_IVIG"))
+dtFC <- GEOFCcompileR(DS=ds, gpl=gp, gsm=gs, namestr=names, duprm = "T")
+
+deg2 <- merge(dtFC, measured, by="Gene.symbol")
+
+#To get expressionset
+k.gset <- getGEO("GSE18606", GSEMatrix =TRUE, getGPL=FALSE)
+if (length(k.gset) > 1) idx <- grep("GPL6480", attr(k.gset, "names")) else idx <- 1
+k.gset <- k.gset[[idx]]
+
+### Generating PCA plots colored by classification
+library(scatterplot3d);library(dplyr)
+#Classifications
+classes = pData(k.gset)$"treatment_category:ch1"
+#Colors such that each classification has its own color
+cols=rainbow(length(unique(classes)))
+point.cols=cols[ as.numeric( as.factor(classes) ) ]
+#Clean-up. Replace NA with 0 to fill in gaps but preserve raw data
+measured[is.na(measured)] <- 0
+measured <- as.data.frame(measured)
+row.names(measured) <- measured$Gene.symbol
+measured <- measured %>% select(-Gene.symbol)
+#measured <- rbind(measured,classes)
+#Separating data based on classification for exploration
+dat.respond.ivig <- measured %>% select(contains("responder_IVIG"))
+dat.nonrespond.ivig <- measured %>% select(contains("non_responder_IVIG"))
+dat.ctrl <- measured %>% select(contains("ctrl"))
+dat.respond <- measured %>% select(contains("responder"))
+dat.norespond <- measured %>% select(contains("non_responder"))
+
+#PCA with samples as variables and genes as observations
+measured.pca <- prcomp(measured)
+#Plot top 2 principal components, where each color presents classification
+plot(measured.pca)
+#PCA with samples as observations and genes as variables
+trans.measured.pca <- prcomp(t(measured))
+plot(trans.measured.pca)
+
+plot(measured.pca$x[,1:2],col=point.cols)
+legend("topright",inset = c(-0.1,0),legend = unique(classes), fill = cols, cex = 0.7, xpd = TRUE)
+#Plot top 2 principal components, most of the variance is PC1
+plot(trans.measured.pca$x[,1:2],col=point.cols)
+legend("topright",inset = c(-0.1,0),legend = unique(classes), fill = cols, cex = 0.7, xpd = TRUE)
+
+#Genes with highest variation
+var.measured <- apply(measured,1,var)
+high=order(var.measured,decreasing=T)[1:300]
+highvar.measured <- measured[high,]
+highvar.pca <- prcomp(t(highvar.measured))
+plot(highvar.pca)
+#Plot top 2 principal components
+plot(highvar.pca$x[,1:2],col=point.cols)
+legend("topright",inset = c(-0.1,0),legend = unique(classes), fill = cols, cex = 0.7, xpd = TRUE)
+sc3=scatterplot3d(highvar.pca$x[,1:3],pch=20,cex.symbol=1,color=point.cols)
+s3d.coords = sc3$xyz.convert(highvar.pca$x[,1:3])
+legend("topright",inset = c(-0.1,0),legend = unique(classes), fill = cols, cex = 0.7, xpd = TRUE)
+
+### Clustering
+library(gplots);library(cluster)
+corr.dist=function(x) { as.dist(1-cor(t(x))) }
+d = dist(t(measured))
+#Looking at a few different clustering options. Looking between 2 and 4 clusters
+#Average linkage
+plot(hclust(d,method="average"),label=colnames(measured),main="Average, count")
+rect.hclust(hclust(d,method="average"),4)
+#Correlation, ward
+plot(hclust(corr.dist(t(measured)),method="ward.D2"),labels=colnames(measured), main="Correlation, Ward")
+rect.hclust(hclust(corr.dist(t(measured)),method="ward.D2"),4)
+
+#K-means
+fit.e=kmeans(t(measured),4)
+data.frame(SAMPLE=colnames(measured),CLUST.ID=fit.e$cluster)
+
+#Silhouette analysis
+num.clust <- c(2:10)
+sil.widths <- vector()
+mean.sil.width <- numeric()
+for (i in num.clust) {
+kmeans.result <- kmeans(t(measured),i)
+sil.widths <- silhouette(kmeans.result$cluster, dist(t(measured)))
+mean.sil.width[i] <- mean(sil.widths[,3])
+}
+plot(num.clust,na.omit(mean.sil.width),xlab="Number of clusters",ylab="Average Silhouette Width")
+
+library(org.Hs.eg.db);library(data.table);library(dplyr);library(topGO);library(AnnotationDbi)
+#controls vs KD pre-IVIG
+deg2.wo.na.pre <- deg2[!is.na(deg2$logFC),]
+DEG.pre <- deg2.wo.na.pre[abs(deg2.wo.na.pre$logFC)>=1 & deg2.wo.na.pre$P.Value<=0.001,]
+#Up- and Down-regulated DEGs, pre
+select.de.up.pre = ! is.na(DEG.pre$P.Value) & DEG.pre$P.Value <= 0.001 & DEG.pre$logFC >=1
+genes.de.up.pre <- DEG.pre[select.de.up.pre,]
+pre.up.ensembl <- mapIds(org.Hs.eg.db, genes.de.up.pre$Gene.symbol, 'ENSEMBL', 'SYMBOL')
+select.de.down.pre = ! is.na(DEG.pre$P.Value) & DEG.pre$P.Value <= 0.001 & DEG.pre$logFC <=(-1)
+genes.de.down.pre <- DEG.pre[select.de.down.pre,]
+pre.down.ensembl <- mapIds(org.Hs.eg.db, genes.de.down.pre$Gene.symbol, 'ENSEMBL', 'SYMBOL')
+
+#controls vs KD post-IVIG
+deg2.wo.na.post <- deg2[!is.na(deg2$P.Value_IVIG),]
+DEG.post <- deg2.wo.na.post[abs(deg2.wo.na.post$logFC_IVIG)>=1 & deg2.wo.na.post$P.Value_IVIG<=0.001,]
+#Up- and Down-regulated DEGs, post
+select.de.up.post = ! is.na(DEG.post$P.Value_IVIG) & DEG.post$P.Value_IVIG <= 0.001 & DEG.post$logFC_IVIG >=1
+genes.de.up.post <- DEG.post[select.de.up.post,]
+post.up.ensembl <- mapIds(org.Hs.eg.db, genes.de.up.post$Gene.symbol, 'ENSEMBL', 'SYMBOL')
+select.de.down.post = ! is.na(DEG.post$P.Value_IVIG) & DEG.post$P.Value_IVIG <= 0.001 & DEG.post$logFC_IVIG <=(-1)
+genes.de.down.post <- DEG.post[select.de.down.post,]
+post.down.ensembl <- mapIds(org.Hs.eg.db, genes.de.down.post$Gene.symbol, 'ENSEMBL', 'SYMBOL')
+
+#Compare all DEG, pre vs post
+comp.similar <- generics::intersect(DEG.pre,DEG.post) #common values
+comp.dif <- generics::setdiff(DEG.pre,DEG.post) #different values
+#Compare upregulated, pre vs post
+up.comp.similar <- generics::intersect(genes.de.up.pre,genes.de.up.post)
+up.comp.dif <- generics::setdiff(genes.de.up.pre,genes.de.up.post)
+#Compare downregulated, pre vs post
+down.comp.similar <- generics::intersect(genes.de.up.pre,genes.de.up.post)
+down.comp.dif <- generics::setdiff(genes.de.down.pre,genes.de.down.post)
+
+all.gene.ids <- mapIds(org.Hs.eg.db, rownames(measured), 'ENSEMBL', 'SYMBOL')
+
+### Gene Ontology Analysis
+
+#GO pre
+all.genes.up.pre = factor(as.integer(all.gene.ids %in% pre.up.ensembl))
+names(all.genes.up.pre) = all.gene.ids
+godata.up.pre=new("topGOdata",ontology="BP",allGenes=all.genes.up.pre,annot=annFUN.org,mapping="org.Hs.eg.db",ID="ENSEMBL")
+resultFisher.up.pre <- runTest(godata.up.pre, algorithm = "classic",
+statistic = "fisher")
+GenTable(godata.up.pre,classicFisher=resultFisher.up.pre,
+ranksOf="classicFisher",topNodes=20)
+
+all.genes.down.pre = factor(as.integer( all.gene.ids %in% pre.down.ensembl))
+names(all.genes.down.pre) = all.gene.ids
+godata.down.pre=new("topGOdata",ontology="BP",
+allGenes=all.genes.down.pre,annot=annFUN.org,
+mapping="org.Hs.eg.db",ID="ENSEMBL")
+resultFisher.down.pre <- runTest(godata.down.pre, algorithm = "classic",
+statistic = "fisher")
+GenTable(godata.down.pre,classicFisher=resultFisher.down.pre,
+ranksOf="classicFisher",topNodes=20)
+
+#GO post
+all.genes.up.post = factor(as.integer(all.gene.ids %in% post.up.ensembl))
+names(all.genes.up.post) = all.gene.ids
+godata.up=new("topGOdata",ontology="BP",allGenes=all.genes.up.post,annot=annFUN.org,mapping="org.Hs.eg.db",ID="ENSEMBL")
+resultFisher.up <- runTest(godata.up, algorithm = "classic",
+statistic = "fisher")
+GenTable(godata.up,classicFisher=resultFisher.up,
+ranksOf="classicFisher",topNodes=20)
+
+all.genes.down.post = factor(as.integer( all.gene.ids %in% post.down.ensembl) )
+names(all.genes.down.post) = all.gene.ids
+godata.down=new("topGOdata",ontology="BP",
+allGenes=all.genes.down.post,annot=annFUN.org,
+mapping="org.Hs.eg.db",ID="ENSEMBL")
+resultFisher.down <- runTest(godata.down, algorithm = "classic",
+statistic = "fisher")
+GenTable(godata.down,classicFisher=resultFisher.down,
+ranksOf="classicFisher",topNodes=20)
+
+#Plot networks
+showSigOfNodes(godata.up.pre, score(resultFisher.up.pre), firstSigNodes = 10, useInfo = 'all')
+showSigOfNodes(godata.down.pre, score(resultFisher.up.pre), firstSigNodes = 10, useInfo = 'all')
+showSigOfNodes(godata.up, score(resultFisher.up), firstSigNodes = 10, useInfo = 'all')
+showSigOfNodes(godata.down, score(resultFisher.down), firstSigNodes = 10, useInfo = 'all')
+
+##Sorted by P-value, most significant genes
+#Most significant Upregulated, pre treatment
+ord.genes.de.up.pre <- setorder(genes.de.up.pre,P.Value)
+sig.up.pre <- ord.genes.de.up.pre[c(1:10),1]
+#Most significant Downregulated, pre treatment
+ord.genes.de.down.pre <- setorder(genes.de.down.pre,P.Value)
+sig.down.pre <- ord.genes.de.down.pre[c(1:10),1]
+#Most significant Upregulated, post treatment
+ord.genes.de.up.post <- setorder(genes.de.up.post,P.Value_IVIG)
+sig.up.post <- ord.genes.de.up.post[c(1:10),1]
+#Most significant Downregulated, post treatment
+ord.genes.de.down.post <- setorder(genes.de.down.post,P.Value_IVIG)
+sig.down.post <- ord.genes.de.down.post[c(1:10),1]
+most.significant <- data.frame(sig.up.pre,sig.down.pre,sig.up.post,sig.down.post,select.deg.pre,select.deg.post)
+colnames(most.significant) <- c("Sig. Upreg, Pre","Sig. Downreg, Pre", "Sig. Upreg, Post","Sig. Downreg, Post", "Most sig, Pre", "Most sig, Post")
+most.significant
+
+top10.norespond <- cbind(norespond.DEGup.post[c(1:10),9],norespond.DEGdown.post[c(1:10),9])
+#Our top 10, most significant up- and down-regulated genes for non-responders to IVIG treatment versus controls
+colnames(top10.norespond) <- c("Up-regulated","Down-regulated")
+top10.norespond
