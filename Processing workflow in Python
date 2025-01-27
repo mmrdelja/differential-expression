@@ -21,18 +21,16 @@ import shutil #imports required for function
 #Lastly, update the featureCounts code (line 101) with the relevant file names.
 
 #Before running the script, ensure the following are installed: fastp, samtools, hisat2, subread.
-#Installation instructions can be found in the write-up.
 
-#Upon unzipping the file, you can find the necessary inputs: 
+#Below are the necessary inputs: 
 #1) the python script (README in comments and write-up)
 #2) test FASTQ (SRR15068323.fastq)
 #3) a reference genome (chr22.fa)
 #4) a GTF annotation file (gencode.v22.annotation.gtf)
-#5) write-up
+
 #These must all be in the working directory for the script to function.
 #All outputs are detailed in the write-up.
-#IMPORTANT: Due to the nature of the data and the alignment tool itself, this script runs slowly,
-#and takes approximately 30 minutes to run. Please allow the script to run and do not interrupt it. 
+#IMPORTANT: Due to the nature of the data and the alignment tool itself, this script runs slowly.
 
 #Our first step is preprocessing of the FASTQs.
 #This script uses the Fastp tool for all preprocessing needs.
@@ -59,9 +57,8 @@ for fastqs in glob.iglob('*.fastq'): #for FASTQ files
 
 #With our FASTQ now processed and prepared for downstream analysis, we can continue.
 #Ensure the reference genome of interest is in the working directory.
-#In our context, we have a fasta file of Chromosome 22 (source in write-up).
+#In this specific context, we have a fasta file of Chromosome 22.
 #This script uses HISAT2 to index the reference and align our FASTQ of interest to the reference.
-#More information about the HISAT2 tool can be found in the write-up.
 
 #First, HISAT2 is used to build the index. This creates the indexes necessary for alignment.
 #More information can be found in the write-up.
@@ -97,7 +94,7 @@ for sorted_bams in glob.iglob('*.sorted.bam'):
     index_bam = f"samtools index {namefix}.sorted.bam" #samtools indexes sorted BAM
     os.system(index_bam) #shell command to index sorted bam files. Generates name.sorted.bam.bai files 
 
-#This enables featureCounts to quantify expression. See write-up if you want to run other files.
+#This enables featureCounts to quantify expression. 
 counts_command = 'featureCounts -a gencode.v22.annotation.gtf -o counts.txt SRR15068323_processed.sorted.bam'
 os.system(counts_command)
 
